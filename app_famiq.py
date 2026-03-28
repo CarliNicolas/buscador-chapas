@@ -7,98 +7,103 @@ st.set_page_config(page_title="Buscador de Chapas - Famiq", page_icon="🔍", la
 
 @st.cache_data
 def cargar_datos():
-    # 1. Leer el archivo detectando automáticamente el separador (punto y coma o coma)
-    # Usamos latin-1 para que no falle con acentos o símbolos de moneda
+    # 1. Leer el archivo con detección automática de separador
     df = pd.read_csv("datos.csv", encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
     
-    # 2. Limpiar espacios invisibles en los nombres de las columnas
-    df.columns = df.columns.str.strip()
-    
-    # 3. Funciones de limpieza de datos
+    # 2. Limpieza agresiva de nombres de columnas
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # 3. Mapeo de columnas (Busca el nombre real aunque varíe un poco)
+    def buscar_columna(posibles_nombres):
+        for nombre in posibles_nombres:
+            if nombre in df.columns:
+                return nombre
+        return None
+
+    col_espesor = buscar_columna(['Espesor', 'ESPESOR', 'espesor'])
+    col_ancho = buscar_columna(['Ancho', 'ANCHO', 'ancho'])
+    col_largo = buscar_columna(['Largo', 'LARGO', 'largo'])
+    col_precio_kg = buscar_columna(['Precio / Kg', 'PRECIO / KG', 'Precio/Kg'])
+    col_precio_un = buscar_columna(['Precio / Unidad', 'PRECIO / UNIDAD', 'Precio/Unidad'])
+    col_calidad = buscar_columna(['Calidad', 'CALIDAD', 'calidad'])
+    col_oferta = buscar_columna(['Inoxsale', 'INOXSALE', 'inoxsale'])
+
+    # 4. Funciones de limpieza
     def limpiar_precio(x):
-        if pd.isna(x): return np.nan
+        if pd.isna(x): return 0.0
         x = str(x).replace('USD', '').replace('\n', '').strip()
-        x = x.replace('.', '').replace(',', '.') # Quitar miles y ajustar decimales
+        x = x.replace('.', '').replace(',', '.')
         try: return float(x)
-        except: return np.nan
+        except: return 0.0
 
     def limpiar_dim(x):
-        if pd.isna(x): return np.nan
+        if pd.isna(x): return 0.0
         x = str(x).lower().replace('mm', '').replace(',', '.').strip()
         try: return float(x)
-        except: return np.nan
+        except: return 0.0
 
-    # 4. Aplicar limpiezas a las columnas
-    # Usamos nombres exactos del CSV de Famiq
-    if 'Precio / Kg' in df.columns:
-        df['Precio USD/Kg'] = df['Precio / Kg'].apply(limpiar_precio)
-    if 'Precio / Unidad' in df.columns:
-        df['Precio Final USD'] = df['Precio / Unidad'].apply(limpiar_precio)
+    # 5. Procesar datos solo si las columnas existen
+    if col_precio_kg: df['Precio USD/Kg'] = df[col_precio_kg].apply(limpiar_precio)
+    else: df['Precio USD/Kg'] = 0.0
+
+    if col_precio_un: df['Precio Final USD'] = df[col_precio_un].apply(limpiar_precio)
+    else: df['Precio Final USD'] = 0.0
     
-    df['Espesor_num'] = df['Espesor'].apply(limpiar_dim)
-    df['Ancho_num'] = df['Ancho'].apply(limpiar_dim)
-    
-    # Intentar limpiar Largo si existe la columna
-    if 'Largo' in df.columns:
-        df['Largo_num'] = df['Largo'].apply(limpiar_dim)
+    if col_espesor: df['Espesor_num'] = df[col_espesor].apply(limpiar_dim)
+    else: df['Espesor_num'] = 0.0
+
+    if col_ancho: df['Ancho_num'] = df[col_ancho].apply(limpiar_dim)
+    else: df['Ancho_num'] = 0.0
+
+    if col_largo: df['Largo_num'] = df[col_largo].apply(limpiar_dim)
+    else: df['Largo_num'] = 0.0
+
+    # Descuento
+    if col_oferta:
+        df['Descuento %'] = df[col_oferta].apply(lambda x: int(str(x).split('%')[0]) if 'OFF' in str(x) else 0)
     else:
-        df['Largo_num'] = 0
+        df['Descuento %'] = 0
 
-    # 5. Calcular porcentaje de descuento para ordenar por "gangas"
-    df['Descuento %'] = df['Inoxsale'].apply(lambda x: int(str(x).split('%')[0]) if 'OFF' in str(x) else 0)
-    
-    return df
+    return df, col_calidad, col_espesor, col_oferta
 
 # --- INTERFAZ ---
 st.title("🛠️ Buscador de Chapas para Papá")
-st.markdown("Busca por medida o calidad para encontrar el mejor precio.")
 
 try:
-    df = cargar_datos()
+    df, col_calidad, col_espesor, col_oferta = cargar_datos()
 
-    # --- FILTROS EN BARRA LATERAL ---
+    # Filtros
     st.sidebar.header("Filtros")
     
-    # Filtro de Calidad
-    calidades = sorted([str(x) for x in df['Calidad'].unique() if pd.notna(x)])
-    calidad_sel = st.sidebar.multiselect("Calidad:", calidades, default=calidades[:2])
+    # Filtro Calidad
+    if col_calidad:
+        calidades = sorted([str(x) for x in df[col_calidad].unique() if pd.notna(x)])
+        calidad_sel = st.sidebar.multiselect("Calidad:", calidades, default=calidades[:2] if len(calidades)>1 else calidades)
+    
+    # Filtro Espesor
+    lista_esp = sorted([float(x) for x in df['Espesor_num'].unique() if x > 0])
+    if lista_esp:
+        esp_sel = st.sidebar.select_slider("Espesor (mm):", options=lista_esp, value=(min(lista_esp), max(lista_esp)))
+    
+    solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones")
 
-    # Filtro de Espesor
-    lista_espesores = sorted([float(x) for x in df['Espesor_num'].unique() if x > 0])
-    esp_sel = st.sidebar.select_slider("Espesor (mm):", options=lista_espesores, value=(min(lista_espesores), max(lista_espesores)))
-
-    # Filtro de Solo Ofertas
-    solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones (Inoxsale)")
-
-    # --- LÓGICA DE FILTRADO ---
+    # Filtrado
     mask = (df['Espesor_num'] >= esp_sel[0]) & (df['Espesor_num'] <= esp_sel[1])
-    
-    if calidad_sel:
-        mask &= df['Calidad'].isin(calidad_sel)
-    
-    if solo_ofertas:
-        mask &= (df['Descuento %'] > 0)
+    if calidad_sel: mask &= df[col_calidad].isin(calidad_sel)
+    if solo_ofertas: mask &= (df['Descuento %'] > 0)
 
-    df_final = df[mask].copy()
+    df_final = df[mask].sort_values('Precio USD/Kg', ascending=True)
 
-    # --- MOSTRAR RESULTADOS ---
-    st.subheader(f"Se encontraron {len(df_final)} opciones:")
+    # Mostrar tabla
+    cols = [col_calidad, col_espesor, 'Ancho', 'Largo', col_oferta, 'Precio USD/Kg', 'Precio Final USD']
+    cols = [c for c in cols if c in df_final.columns or c in ['Precio USD/Kg', 'Precio Final USD']]
     
-    # Ordenar por el precio por kilo más barato (la verdadera ganga)
-    df_final = df_final.sort_values('Precio USD/Kg', ascending=True)
-
-    # Columnas a mostrar al usuario
-    cols_mostrar = ['SKU', 'Calidad', 'Espesor', 'Ancho', 'Largo', 'Inoxsale', 'Precio USD/Kg', 'Precio Final USD']
-    
-    # Mostrar tabla amigable
     st.dataframe(
-        df_final[cols_mostrar].style.format({'Precio USD/Kg': '${:.2f}', 'Precio Final USD': '${:.2f}'}),
+        df_final[cols].style.format({'Precio USD/Kg': '${:.2f}', 'Precio Final USD': '${:.2f}'}),
         use_container_width=True,
         hide_index=True
     )
 
-    st.info("💡 Consejo: Las chapas al principio de la lista son las que tienen el mejor precio por kilo.")
-
 except Exception as e:
-    st.error("Hubo un problema al cargar los datos. Verifica que el archivo se llame 'datos.csv' en GitHub.")
+    st.error("Error de lectura. Revisa que el archivo CSV en GitHub no tenga filas vacías al principio.")
     st.write(e)
