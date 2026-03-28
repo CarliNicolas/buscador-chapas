@@ -50,7 +50,20 @@ datos = cargar_datos()
 if datos:
     df, col_sku, col_cal, col_esp, col_anc, col_lar, col_ino = datos
     
-    st.sidebar.header("Filtros de Medida")
+    st.sidebar.header("Medidas Estándar")
+    # --- SELECTOR DE MEDIDAS PREDEFINIDAS ---
+    medidas_pre = {
+        "Manual / Ver todas": (None, None),
+        "1000 x 2000 mm": (1000, 2000),
+        "1220 x 2440 mm": (1220, 2440),
+        "1250 x 2500 mm": (1250, 2500),
+        "1500 x 3000 mm": (1500, 3000),
+        "1500 x 6000 mm": (1500, 6000)
+    }
+    seleccion = st.sidebar.selectbox("Elegir medida rápida:", list(medidas_pre.keys()))
+    anc_pre, lar_pre = medidas_pre[seleccion]
+
+    st.sidebar.header("Filtros de Precisión")
     
     # --- FILTRO ESPESOR ---
     st.sidebar.subheader("Espesor (mm)")
@@ -60,24 +73,26 @@ if datos:
     with c2: esp_max = st.number_input("E. Max:", 0.0, max_e, max_e, 0.1)
 
     # --- FILTRO ANCHO ---
-    st.sidebar.subheader("Ancho (mm)")
     min_a, max_a = float(df['anc_n'].min()), float(df['anc_n'].max())
+    val_a_min = float(anc_pre) if anc_pre else min_a
+    val_a_max = float(anc_pre) if anc_pre else max_a
+    st.sidebar.subheader("Ancho (mm)")
     c3, c4 = st.sidebar.columns(2)
-    with c3: anc_min = st.number_input("A. Min:", 0.0, max_a, min_a, 10.0)
-    with c4: anc_max = st.number_input("A. Max:", 0.0, max_a, max_a, 10.0)
+    with c3: anc_min = st.number_input("A. Min:", 0.0, max_a, val_a_min, 10.0)
+    with c4: anc_max = st.number_input("A. Max:", 0.0, max_a, val_a_max, 10.0)
 
     # --- FILTRO LARGO ---
-    st.sidebar.subheader("Largo (mm)")
     min_l, max_l = float(df['lar_n'].min()), float(df['lar_n'].max())
+    val_l_min = float(lar_pre) if lar_pre else min_l
+    val_l_max = float(lar_pre) if lar_pre else max_l
+    st.sidebar.subheader("Largo (mm)")
     c5, c6 = st.sidebar.columns(2)
-    with c5: lar_min = st.number_input("L. Min:", 0.0, max_l, min_l, 10.0)
-    with c6: lar_max = st.number_input("L. Max:", 0.0, max_l, max_l, 10.0)
+    with c5: lar_min = st.number_input("L. Min:", 0.0, max_l, val_l_min, 10.0)
+    with c6: lar_max = st.number_input("L. Max:", 0.0, max_l, val_l_max, 10.0)
 
-    st.sidebar.header("Otros Filtros")
-    # Filtro de Calidad
+    st.sidebar.header("Otros")
     opciones_cal = sorted([str(x) for x in df[col_cal].unique() if x]) if col_cal else []
     cal_sel = st.sidebar.multiselect("Calidad:", opciones_cal, default=opciones_cal)
-
     solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones")
 
     # --- APLICAR TODOS LOS FILTROS ---
