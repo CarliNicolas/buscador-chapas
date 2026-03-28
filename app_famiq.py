@@ -1,104 +1,98 @@
 import streamlit as st
-import pandas as pd
+import pd as pd
 import re
 import os
 
-st.set_page_config(page_title="Buscador de Chapas - Famiq", layout="wide")
+st.set_page_config(page_title="Buscador de Gangas - Famiq", layout="wide")
 
 @st.cache_data
 def cargar_datos():
     archivos = [f for f in os.listdir('.') if f.endswith('.csv')]
     if not archivos: return None
     
-    # Abrir el archivo ignorando errores de codificación
     df = pd.read_csv(archivos[0], encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
-    
-    # 1. Limpiar nombres de columnas (quitar comillas y espacios)
+    # Limpiamos nombres de columnas quitando comillas y espacios
     df.columns = [str(c).replace('"', '').strip() for c in df.columns]
 
-    # 2. FUNCIÓN DE LIMPIEZA DEFINITIVA (Saca el USD, el salto de línea y las comas)
-    def limpiar_precio_famiq(txt):
-        if pd.isna(txt) or txt == "": return 0.0
-        # Quitamos "USD", comillas y cualquier letra
-        limpio = str(txt).replace('USD', '').replace('"', '').strip()
-        # Buscamos solo los números y separadores (. o ,)
-        numeros = re.findall(r'[0-9.,]+', limpio)
+    def extraer_num(txt):
+        txt = str(txt)
+        if pd.isna(txt) or "CONSULTAR" in txt.upper(): return 0.0
+        numeros = re.findall(r'[\d.,]+', txt)
         if not numeros: return 0.0
-        
-        val = numeros[-1] # El último grupo de números
-        # Si tiene punto y coma (ej: 1.200,50) quitamos el punto y cambiamos coma por punto
-        if '.' in val and ',' in val:
-            val = val.replace('.', '').replace(',', '.')
-        else:
-            # Si solo tiene coma (ej: 3,44) la cambiamos por punto
-            val = val.replace(',', '.')
-            
+        val = numeros[-1]
+        if ',' in val and '.' in val: val = val.replace('.', '').replace(',', '.')
+        elif ',' in val: val = val.replace(',', '.')
         try: return float(val)
         except: return 0.0
 
-    # 3. Mapeo de columnas inteligentes
+    # Buscamos las columnas por lo que contienen (no importa si es SKU o sku)
+    c_sku = next((c for c in df.columns if 'sku' in c.lower()), None)
     c_esp = next((c for c in df.columns if 'espesor' in c.lower()), None)
     c_pkg = next((c for c in df.columns if 'kg' in c.lower()), None)
     c_pun = next((c for c in df.columns if 'unidad' in c.lower()), None)
     c_cal = next((c for c in df.columns if 'calidad' in c.lower()), None)
-    c_inox = next((c for c in df.columns if 'inox' in c.lower()), None)
+    c_ino = next((c for c in df.columns if 'inox' in c.lower() or 'sale' in c.lower()), None)
 
-    # 4. Convertir columnas a números reales
-    df['pkg_n'] = df[c_pkg].apply(limpiar_precio_famiq) if c_pkg else 0.0
-    df['pun_n'] = df[c_pun].apply(limpiar_precio_famiq) if c_pun else 0.0
-    df['esp_n'] = df[c_esp].apply(limpiar_precio_famiq) if c_esp else 0.0
+    # Procesamos números
+    df['pkg_n'] = df[c_pkg].apply(extraer_num) if c_pkg else 0.0
+    df['pun_n'] = df[c_pun].apply(extraer_num) if c_pun else 0.0
+    df['esp_n'] = df[c_esp].apply(extraer_num) if c_esp else 0.0
     
-    # Marcar si es liquidación (Inoxsale)
-    if c_inox:
-        df['es_oferta'] = df[c_inox].apply(lambda x: 1 if '%' in str(x) or 'sale' in str(x).lower() else 0)
-    else:
-        df['es_oferta'] = 0
+    # Solo dejamos lo que tenga precio
+    df = df[df['pkg_n'] > 0].copy()
     
-    return df, c_cal, c_esp, c_inox
+    return df, c_sku, c_cal, c_esp, c_ino
 
-st.title("🛠️ Buscador de Chapas para Papá")
+st.title("🔍 Buscador de Chapas (Precios Reales)")
 
-pack = cargar_datos()
+datos = cargar_datos()
 
-if pack:
-    df, col_calidad, col_espesor, col_inox = pack
+if datos:
+    df, col_sku, col_cal, col_esp, col_ino = datos
     
-    # --- BARRA LATERAL ---
     st.sidebar.header("Filtros")
     
-    # Calidad (304, 430, etc)
-    c_cal = col_calidad if col_calidad else df.columns[0]
-    opciones_cal = sorted([str(x) for x in df[c_cal].unique() if x])
-    cal_sel = st.sidebar.multiselect("Filtrar por Calidad:", opciones_cal, default=opciones_cal)
+    # Filtro de Calidad
+    opciones_cal = sorted([str(x) for x in df[col_cal].unique() if x]) if col_cal else []
+    cal_sel = st.sidebar.multiselect("Calidad:", opciones_cal, default=opciones_cal)
 
-    # Espesor (0.5mm, 1mm, etc)
-    min_e = float(df['esp_n'].min())
-    max_e = float(df['esp_n'].max())
-    if min_e == max_e: max_e += 0.5
-    esp_sel = st.sidebar.slider("Rango de Espesor (mm):", min_e, max_e, (min_e, max_e))
+    # Filtro de Espesor
+    min_e, max_e = float(df['esp_n'].min()), float(df['esp_n'].max())
+    esp_sel = st.sidebar.slider("Espesor (mm):", min_e, max_e, (min_e, max_e))
 
     solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones")
 
-    # --- FILTRADO ---
+    # Aplicar Filtros
     mask = (df['esp_n'] >= esp_sel[0]) & (df['esp_n'] <= esp_sel[1])
-    if cal_sel: mask &= df[c_cal].astype(str).isin(cal_sel)
-    if solo_ofertas: mask &= (df['es_oferta'] > 0)
+    if cal_sel and col_cal: mask &= df[col_cal].astype(str).isin(cal_sel)
+    if solo_ofertas and col_ino:
+        mask &= (df[col_ino].str.contains('%|sale', case=False, na=False))
 
-    res = df[mask].copy()
+    res = df[mask].sort_values('pkg_n', ascending=True)
 
-    # --- RESULTADOS ---
-    st.subheader(f"Se encontraron {len(res)} chapas")
+    st.subheader(f"Se encontraron {len(res)} chapas con precio")
     
-    # Ordenar por el más barato por kilo
-    res = res.sort_values('pkg_n', ascending=True)
-
-    # Formatear la tabla para que se vea linda
-    res['Precio x Kg'] = res['pkg_n'].map('${:.2f}'.format)
-    res['Precio Total'] = res['pun_n'].map('${:.2f}'.format)
+    res_v = res.copy()
+    res_v['USD/Kg'] = res_v['pkg_n'].map('${:.2f}'.format)
+    res_v['Total'] = res_v['pun_n'].map('${:.2f}'.format)
     
-    columnas_ver = [c for c in [col_calidad, col_espesor, 'Ancho', 'Largo', col_inox] if c in res.columns]
-    columnas_ver += ['Precio x Kg', 'Precio Total']
+    # ARREGLO DEL SKU: Aseguramos que el SKU sea la primera columna
+    columnas_finales = []
+    if col_sku: columnas_finales.append(col_sku)
+    if col_cal: columnas_finales.append(col_cal)
+    if col_esp: columnas_finales.append(col_esp)
     
-    st.dataframe(res[columnas_ver], use_container_width=True, hide_index=True)
+    # Agregamos Ancho y Largo si existen
+    for c in ['Ancho', 'Largo']:
+        if c in res_v.columns: columnas_finales.append(c)
+        
+    if col_ino: columnas_finales.append(col_ino)
+    columnas_finales += ['USD/Kg', 'Total']
+    
+    st.dataframe(res_v[columnas_finales], use_container_width=True, hide_index=True)
+    
+    # Botón de Descarga
+    csv = res_v[columnas_finales].to_csv(index=False).encode('latin-1')
+    st.download_button("📥 Descargar esta lista", csv, "gangas_famiq.csv", "text/csv")
 else:
-    st.error("No se encontró el archivo de datos.")
+    st.warning("No se encontró el archivo .csv.")
