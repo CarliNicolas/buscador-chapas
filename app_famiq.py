@@ -9,7 +9,6 @@ st.set_page_config(page_title="Buscador de Gangas - Famiq", layout="wide")
 def cargar_datos():
     archivos = [f for f in os.listdir('.') if f.endswith('.csv')]
     if not archivos: return None
-    
     df = pd.read_csv(archivos[0], encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
     df.columns = [str(c).replace('"', '').strip() for c in df.columns]
 
@@ -53,14 +52,12 @@ def cargar_datos():
     
     return df, c_sku, c_cal, c_esp, c_anc, c_lar, c_ino
 
-st.title("🔍 Buscador de Chapas para Papá")
-
 datos = cargar_datos()
 
 if datos:
     df, col_sku, col_cal, col_esp, col_anc, col_lar, col_ino = datos
     
-    st.sidebar.header("Medidas Estándar")
+    # --- LÓGICA DE MEMORIA (SESSION STATE) ---
     medidas_pre = {
         "Manual / Ver todas": (None, None),
         "1000 x 2000 mm": (1000.0, 2000.0),
@@ -68,38 +65,61 @@ if datos:
         "1250 x 2500 mm": (1250.0, 2500.0),
         "1500 x 3000 mm": (1500.0, 3000.0)
     }
-    seleccion = st.sidebar.selectbox("Medida rápida:", list(medidas_pre.keys()))
-    anc_pre, lar_pre = medidas_pre[seleccion]
+
+    def actualizar_medidas():
+        sel = st.session_state.medida_rapida
+        anc_p, lar_p = medidas_pre[sel]
+        if anc_p:
+            st.session_state.anc_min = anc_p
+            st.session_state.anc_max = anc_p
+            st.session_state.lar_min = lar_p
+            st.session_state.lar_max = lar_p
+        else:
+            st.session_state.anc_min = float(df['anc_n'].min())
+            st.session_state.anc_max = float(df['anc_n'].max())
+            st.session_state.lar_min = float(df['lar_n'].min())
+            st.session_state.lar_max = float(df['lar_n'].max())
+
+    # Inicializar valores si no existen
+    if 'anc_min' not in st.session_state:
+        st.session_state.anc_min = float(df['anc_n'].min())
+        st.session_state.anc_max = float(df['anc_n'].max())
+        st.session_state.lar_min = float(df['lar_n'].min())
+        st.session_state.lar_max = float(df['lar_n'].max())
+
+    st.title("🔍 Buscador de Chapas para Papá")
+
+    st.sidebar.header("Medidas Estándar")
+    st.sidebar.selectbox("Elegir medida rápida:", list(medidas_pre.keys()), key="medida_rapida", on_change=actualizar_medidas)
 
     st.sidebar.header("Filtros de Precisión")
     
-    # Espesor - Sin límite máximo rígido
+    # Espesor
     st.sidebar.subheader("Espesor (mm)")
     c1, c2 = st.sidebar.columns(2)
-    max_e_file = float(df['esp_n'].max()) + 10.0
     with c1: esp_min = st.number_input("E. Min:", 0.0, 500.0, float(df['esp_n'].min()), 0.1)
-    with c2: esp_max = st.number_input("E. Max:", 0.0, 500.0, max_e_file, 0.1)
+    with c2: esp_max = st.number_input("E. Max:", 0.0, 500.0, float(df['esp_n'].max()), 0.1)
 
-    # Ancho y Largo - Subimos el límite a 50.000 para que no falle nunca
+    # Ancho y Largo - Ahora usan la memoria de Session State
     max_a_limit = max(float(df['anc_n'].max()), 20000.0)
     max_l_limit = max(float(df['lar_n'].max()), 20000.0)
     
     st.sidebar.subheader("Ancho (mm)")
     c3, c4 = st.sidebar.columns(2)
-    with c3: anc_min = st.number_input("A. Min:", 0.0, max_a_limit, anc_pre if anc_pre else float(df['anc_n'].min()), key="anc_min")
-    with c4: anc_max = st.number_input("A. Max:", 0.0, max_a_limit, anc_pre if anc_pre else float(df['anc_n'].max()), key="anc_max")
+    with c3: anc_min = st.number_input("A. Min:", 0.0, max_a_limit, key="anc_min")
+    with c4: anc_max = st.number_input("A. Max:", 0.0, max_a_limit, key="anc_max")
     
     st.sidebar.subheader("Largo (mm)")
     c5, c6 = st.sidebar.columns(2)
-    with c5: lar_min = st.number_input("L. Min:", 0.0, max_l_limit, lar_pre if lar_pre else float(df['lar_n'].min()), key="lar_min")
-    with c6: lar_max = st.number_input("L. Max:", 0.0, max_l_limit, lar_pre if lar_pre else float(df['lar_n'].max()), key="lar_max")
+    with c5: lar_min = st.number_input("L. Min:", 0.0, max_l_limit, key="lar_min")
+    with c6: lar_max = st.number_input("L. Max:", 0.0, max_l_limit, key="lar_max")
 
     st.sidebar.header("Opciones Especiales")
     orden_rentable = st.sidebar.checkbox("⭐ Ordenar por mejor Oportunidad", value=True)
     ver_anomalias = st.sidebar.checkbox("🚨 Errores de tipeo (Muy baratos)")
     solo_ofertas = st.sidebar.checkbox("💥 Solo Liquidaciones")
 
-    # --- FILTROS ---
+    # --- APLICAR FILTROS ---
     mask = (df['esp_n'] >= esp_min) & (df['esp_n'] <= esp_max)
     mask &= (df['anc_n'] >= anc_min) & (df['anc_n'] <= anc_max)
     mask &= (df['lar_n'] >= lar_min) & (df['lar_n'] <= lar_max)
@@ -129,3 +149,4 @@ if datos:
     st.download_button("📥 Descargar", csv, "famiq.csv", "text/csv")
 else:
     st.error("Archivo no encontrado.")
+    
