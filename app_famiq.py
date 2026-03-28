@@ -39,7 +39,7 @@ def cargar_datos():
     
     return df, c_sku, c_cal, c_esp, c_ino
 
-st.title("🔍 Buscador de Chapas para Papá")
+st.title("🔍 Buscador de Chapas para Mec")
 
 datos = cargar_datos()
 
