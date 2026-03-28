@@ -78,8 +78,8 @@ if datos:
 
     st.sidebar.header("Filtros")
     c1, c2 = st.sidebar.columns(2)
-    with c1: esp_min = st.number_input("E. Min:", 0.0, 50.0, float(df['esp_n'].min()), 0.1)
-    with c2: esp_max = st.number_input("E. Max:", 0.0, 50.0, float(df['esp_n'].max()), 0.1)
+    with c1: esp_min = st.number_input("Espesor Min:", 0.0, 50.0, float(df['esp_n'].min()), 0.1)
+    with c2: esp_max = st.number_input("Espesor Max:", 0.0, 50.0, float(df['esp_n'].max()), 0.1)
 
     st.sidebar.header("Rentabilidad")
     # --- EL NUEVO CHECK DE ORDEN ---
