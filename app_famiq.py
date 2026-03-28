@@ -74,7 +74,7 @@ if pack:
     # Espesor (0.5mm, 1mm, etc)
     min_e = float(df['esp_n'].min())
     max_e = float(df['esp_n'].max())
-    if min_e == max_e: max_e += 5.0
+    if min_e == max_e: max_e += 0.5
     esp_sel = st.sidebar.slider("Rango de Espesor (mm):", min_e, max_e, (min_e, max_e))
 
     solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones")
