@@ -73,25 +73,26 @@ if datos:
 
     st.sidebar.header("Filtros de Precisión")
     
-    # Espesor
+    # Espesor - Sin límite máximo rígido
     st.sidebar.subheader("Espesor (mm)")
     c1, c2 = st.sidebar.columns(2)
-    with c1: esp_min = st.number_input("E. Min:", 0.0, 50.0, float(df['esp_n'].min()), 0.1)
-    with c2: esp_max = st.number_input("E. Max:", 0.0, 50.0, float(df['esp_n'].max()), 0.1)
+    max_e_file = float(df['esp_n'].max()) + 10.0
+    with c1: esp_min = st.number_input("E. Min:", 0.0, 500.0, float(df['esp_n'].min()), 0.1)
+    with c2: esp_max = st.number_input("E. Max:", 0.0, 500.0, max_e_file, 0.1)
 
-    # Ancho y Largo con lógica de desbloqueo manual
-    min_a, max_a = float(df['anc_n'].min()), float(df['anc_n'].max())
-    min_l, max_l = float(df['lar_n'].min()), float(df['lar_n'].max())
+    # Ancho y Largo - Subimos el límite a 50.000 para que no falle nunca
+    max_a_limit = max(float(df['anc_n'].max()), 20000.0)
+    max_l_limit = max(float(df['lar_n'].max()), 20000.0)
     
     st.sidebar.subheader("Ancho (mm)")
     c3, c4 = st.sidebar.columns(2)
-    with c3: anc_min = st.number_input("A. Min:", 0.0, 10000.0, anc_pre if anc_pre else min_a, key="anc_min")
-    with c4: anc_max = st.number_input("A. Max:", 0.0, 10000.0, anc_pre if anc_pre else max_a, key="anc_max")
+    with c3: anc_min = st.number_input("A. Min:", 0.0, max_a_limit, anc_pre if anc_pre else float(df['anc_n'].min()), key="anc_min")
+    with c4: anc_max = st.number_input("A. Max:", 0.0, max_a_limit, anc_pre if anc_pre else float(df['anc_n'].max()), key="anc_max")
     
     st.sidebar.subheader("Largo (mm)")
     c5, c6 = st.sidebar.columns(2)
-    with c5: lar_min = st.number_input("L. Min:", 0.0, 10000.0, lar_pre if lar_pre else min_l, key="lar_min")
-    with c6: lar_max = st.number_input("L. Max:", 0.0, 10000.0, lar_pre if lar_pre else max_l, key="lar_max")
+    with c5: lar_min = st.number_input("L. Min:", 0.0, max_l_limit, lar_pre if lar_pre else float(df['lar_n'].min()), key="lar_min")
+    with c6: lar_max = st.number_input("L. Max:", 0.0, max_l_limit, lar_pre if lar_pre else float(df['lar_n'].max()), key="lar_max")
 
     st.sidebar.header("Opciones Especiales")
     orden_rentable = st.sidebar.checkbox("⭐ Ordenar por mejor Oportunidad", value=True)
@@ -108,7 +109,6 @@ if datos:
 
     res = df[mask].copy()
 
-    # Orden
     if orden_rentable:
         res = res.sort_values('score_rentabilidad', ascending=False)
     else:
@@ -116,7 +116,6 @@ if datos:
 
     st.subheader(f"Se encontraron {len(res)} resultados")
 
-    # Formatear
     res_v = res.copy()
     res_v['USD/Kg'] = res_v['pkg_n'].map('${:.2f}'.format)
     res_v['Total'] = res_v['pun_n'].map('${:.2f}'.format)
@@ -130,4 +129,3 @@ if datos:
     st.download_button("📥 Descargar", csv, "famiq.csv", "text/csv")
 else:
     st.error("Archivo no encontrado.")
-    
