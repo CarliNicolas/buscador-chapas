@@ -2,99 +2,103 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-# Configuración inicial de la app
-st.set_page_config(page_title="Buscador de Gangas - Famiq", page_icon="🔍", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Buscador de Chapas - Famiq", page_icon="🔍", layout="wide")
 
-# Función para cargar y limpiar los datos (se guarda en caché para que sea ultra rápido)
 @st.cache_data
 def cargar_datos():
-    # Cargar el archivo
+    # 1. Leer el archivo detectando automáticamente el separador (punto y coma o coma)
+    # Usamos latin-1 para que no falle con acentos o símbolos de moneda
     df = pd.read_csv("datos.csv", encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
     
-    # Limpiar precios
+    # 2. Limpiar espacios invisibles en los nombres de las columnas
+    df.columns = df.columns.str.strip()
+    
+    # 3. Funciones de limpieza de datos
     def limpiar_precio(x):
         if pd.isna(x): return np.nan
         x = str(x).replace('USD', '').replace('\n', '').strip()
-        x = x.replace('.', '').replace(',', '.')
+        x = x.replace('.', '').replace(',', '.') # Quitar miles y ajustar decimales
         try: return float(x)
         except: return np.nan
-        
-    df['Precio USD/Kg'] = df['Precio / Kg'].apply(limpiar_precio)
-    df['Precio Final USD'] = df['Precio / Unidad'].apply(limpiar_precio)
-    
-    # Limpiar dimensiones
+
     def limpiar_dim(x):
         if pd.isna(x): return np.nan
         x = str(x).lower().replace('mm', '').replace(',', '.').strip()
         try: return float(x)
         except: return np.nan
 
-    df['Espesor (mm)'] = df['Espesor'].apply(limpiar_dim)
-    df['Ancho (mm)'] = df['Ancho'].apply(limpiar_dim)
-    df['Largo (mm)'] = df['Largo'].apply(limpiar_dim)
+    # 4. Aplicar limpiezas a las columnas
+    # Usamos nombres exactos del CSV de Famiq
+    if 'Precio / Kg' in df.columns:
+        df['Precio USD/Kg'] = df['Precio / Kg'].apply(limpiar_precio)
+    if 'Precio / Unidad' in df.columns:
+        df['Precio Final USD'] = df['Precio / Unidad'].apply(limpiar_precio)
     
-    # Extraer porcentaje de descuento para ordenar
+    df['Espesor_num'] = df['Espesor'].apply(limpiar_dim)
+    df['Ancho_num'] = df['Ancho'].apply(limpiar_dim)
+    
+    # Intentar limpiar Largo si existe la columna
+    if 'Largo' in df.columns:
+        df['Largo_num'] = df['Largo'].apply(limpiar_dim)
+    else:
+        df['Largo_num'] = 0
+
+    # 5. Calcular porcentaje de descuento para ordenar por "gangas"
     df['Descuento %'] = df['Inoxsale'].apply(lambda x: int(str(x).split('%')[0]) if 'OFF' in str(x) else 0)
     
     return df
 
-# --- INTERFAZ DE LA APLICACIÓN ---
+# --- INTERFAZ ---
+st.title("🛠️ Buscador de Chapas para Papá")
+st.markdown("Busca por medida o calidad para encontrar el mejor precio.")
 
-st.title("🛠️ Buscador Inteligente de Chapas - Famiq")
-st.markdown("Filtra por medidas, calidad o espesor para encontrar las mejores oportunidades del listado.")
+try:
+    df = cargar_datos()
 
-# Cargar los datos
-df = cargar_datos()
+    # --- FILTROS EN BARRA LATERAL ---
+    st.sidebar.header("Filtros")
+    
+    # Filtro de Calidad
+    calidades = sorted([str(x) for x in df['Calidad'].unique() if pd.notna(x)])
+    calidad_sel = st.sidebar.multiselect("Calidad:", calidades, default=calidades[:2])
 
-# --- BARRA LATERAL (Filtros) ---
-st.sidebar.header("Filtros de Búsqueda")
+    # Filtro de Espesor
+    lista_espesores = sorted([float(x) for x in df['Espesor_num'].unique() if x > 0])
+    esp_sel = st.sidebar.select_slider("Espesor (mm):", options=lista_espesores, value=(min(lista_espesores), max(lista_espesores)))
 
-# 1. Filtro de Calidad (ej. 304, 430)
-calidades_disponibles = df['Calidad'].dropna().unique().tolist()
-calidad_seleccionada = st.sidebar.multiselect("Calidad del Acero:", calidades_disponibles, default=["304", "430"])
+    # Filtro de Solo Ofertas
+    solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones (Inoxsale)")
 
-# 2. Filtro de Espesor
-min_esp = float(df['Espesor (mm)'].min())
-max_esp = float(df['Espesor (mm)'].max())
-espesor_rango = st.sidebar.slider("Espesor (mm):", min_value=min_esp, max_value=max_esp, value=(min_esp, max_esp), step=0.1)
+    # --- LÓGICA DE FILTRADO ---
+    mask = (df['Espesor_num'] >= esp_sel[0]) & (df['Espesor_num'] <= esp_sel[1])
+    
+    if calidad_sel:
+        mask &= df['Calidad'].isin(calidad_sel)
+    
+    if solo_ofertas:
+        mask &= (df['Descuento %'] > 0)
 
-# 3. Filtro de Ancho y Largo
-min_ancho, max_ancho = float(df['Ancho (mm)'].min()), float(df['Ancho (mm)'].max())
-ancho_rango = st.sidebar.slider("Rango de Ancho (mm):", min_ancho, max_ancho, (min_ancho, max_ancho), step=100.0)
+    df_final = df[mask].copy()
 
-min_largo, max_largo = float(df['Largo (mm)'].min()), float(df['Largo (mm)'].max())
-largo_rango = st.sidebar.slider("Rango de Largo (mm):", min_largo, max_largo, (min_largo, max_largo), step=100.0)
+    # --- MOSTRAR RESULTADOS ---
+    st.subheader(f"Se encontraron {len(df_final)} opciones:")
+    
+    # Ordenar por el precio por kilo más barato (la verdadera ganga)
+    df_final = df_final.sort_values('Precio USD/Kg', ascending=True)
 
-# 4. Solo Ofertas
-solo_ofertas = st.sidebar.checkbox("💥 Mostrar SOLO artículos con descuento (Inoxsale)")
+    # Columnas a mostrar al usuario
+    cols_mostrar = ['SKU', 'Calidad', 'Espesor', 'Ancho', 'Largo', 'Inoxsale', 'Precio USD/Kg', 'Precio Final USD']
+    
+    # Mostrar tabla amigable
+    st.dataframe(
+        df_final[cols_mostrar].style.format({'Precio USD/Kg': '${:.2f}', 'Precio Final USD': '${:.2f}'}),
+        use_container_width=True,
+        hide_index=True
+    )
 
-# --- APLICAR FILTROS ---
-df_filtrado = df.copy()
+    st.info("💡 Consejo: Las chapas al principio de la lista son las que tienen el mejor precio por kilo.")
 
-if calidad_seleccionada:
-    df_filtrado = df_filtrado[df_filtrado['Calidad'].isin(calidad_seleccionada)]
-
-df_filtrado = df_filtrado[
-    (df_filtrado['Espesor (mm)'] >= espesor_rango[0]) & (df_filtrado['Espesor (mm)'] <= espesor_rango[1]) &
-    (df_filtrado['Ancho (mm)'] >= ancho_rango[0]) & (df_filtrado['Ancho (mm)'] <= ancho_rango[1]) &
-    (df_filtrado['Largo (mm)'] >= largo_rango[0]) & (df_filtrado['Largo (mm)'] <= largo_rango[1])
-]
-
-if solo_ofertas:
-    df_filtrado = df_filtrado[df_filtrado['Descuento %'] > 0]
-
-# --- MOSTRAR RESULTADOS ---
-st.subheader(f"Resultados encontrados: {len(df_filtrado)} chapas")
-
-# Ordenar por el mejor precio por kilo por defecto
-df_mostrar = df_filtrado[['SKU', 'Calidad', 'Espesor', 'Ancho', 'Largo', 'Inoxsale', 'Precio USD/Kg', 'Precio Final USD']]
-df_mostrar = df_mostrar.sort_values(by=['Precio USD/Kg'])
-
-# Mostrar la tabla en la app
-st.dataframe(
-    df_mostrar.style.format({'Precio USD/Kg': '${:.2f}', 'Precio Final USD': '${:.2f}'}),
-    use_container_width=True,
-    hide_index=True
-)
-
-st.success("💡 **Tip:** Las filas de arriba son las más baratas por kilo dentro de tus medidas seleccionadas.")
+except Exception as e:
+    st.error("Hubo un problema al cargar los datos. Verifica que el archivo se llame 'datos.csv' en GitHub.")
+    st.write(e)
