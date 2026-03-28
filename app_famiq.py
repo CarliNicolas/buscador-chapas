@@ -6,85 +6,99 @@ st.set_page_config(page_title="Buscador de Chapas - Famiq", page_icon="🔍", la
 
 @st.cache_data
 def cargar_datos():
-    # 1. Leer el archivo intentando limpiar caracteres de control
+    # 1. Leer el archivo intentando separar bien las columnas
     df = pd.read_csv("datos.csv", encoding="latin-1", sep=None, engine='python', on_bad_lines='skip')
     
-    # 2. Limpiar nombres de columnas de comillas y espacios
-    df.columns = [c.replace('"', '').strip() for c in df.columns]
+    # 2. Limpiar nombres de columnas: quitar comillas, espacios y saltos de línea
+    df.columns = [str(c).replace('"', '').replace('\n', ' ').strip() for c in df.columns]
 
-    # 3. Función para limpiar celdas con "USD \n 1.23" o similares
-    def limpiar_valor(x):
+    # 3. Función para limpiar el contenido de las celdas
+    def limpiar_texto(x):
         if pd.isna(x): return ""
-        # Quitamos comillas, USD, saltos de línea y espacios
-        return str(x).replace('"', '').replace('USD', '').replace('\n', '').strip()
+        return str(x).replace('"', '').replace('USD', '').replace('\n', ' ').strip()
 
-    # Limpiar todo el DataFrame de comillas visibles en los datos
     for col in df.columns:
-        df[col] = df[col].apply(limpiar_valor)
+        df[col] = df[col].apply(limpiar_texto)
 
-    # 4. Mapeo de columnas corregido
-    col_esp = 'Espesor'
-    col_pre_kg = 'Precio / Kg'
-    col_pre_un = 'Precio / Unidad'
-    col_calidad = 'Calidad'
-    col_inox = 'Inoxsale'
+    # 4. Buscador inteligente de columnas (para que no falle por el nombre exacto)
+    def encontrar(lista_posibles):
+        for p in lista_posibles:
+            for c in df.columns:
+                if p.lower() in c.lower(): return c
+        return None
+
+    c_sku = encontrar(['sku'])
+    c_esp = encontrar(['espesor', 'esp'])
+    c_cal = encontrar(['calidad', 'cal'])
+    c_anc = encontrar(['ancho'])
+    c_lar = encontrar(['largo'])
+    c_pkg = encontrar(['precio / kg', 'kg'])
+    c_pun = encontrar(['precio / unidad', 'unidad'])
+    c_ino = encontrar(['inoxsale', 'oferta'])
 
     # 5. Convertir a números
-    def a_numero(x):
+    def a_num(x):
         if not x: return 0.0
-        # Cambiamos coma decimal por punto y quitamos puntos de miles
-        val = x.replace(' mm', '').replace('.', '').replace(',', '.')
-        try: return float(val)
+        # Quitamos todo lo que no sea número, coma o punto
+        limpio = "".join(c for c in str(x) if c.isdigit() or c in ',.')
+        if not limpio: return 0.0
+        # Si tiene puntos y comas, asumimos formato latino (1.000,00)
+        if '.' in limpio and ',' in limpio:
+            limpio = limpio.replace('.', '').replace(',', '.')
+        else:
+            limpio = limpio.replace(',', '.')
+        try: return float(limpio)
         except: return 0.0
 
-    df['Espesor_num'] = df[col_esp].apply(a_numero) if col_esp in df.columns else 0.0
-    df['Precio_Kg_num'] = df[col_pre_kg].apply(a_numero) if col_pre_kg in df.columns else 0.0
-    df['Precio_Un_num'] = df[col_pre_un].apply(a_numero) if col_pre_un in df.columns else 0.0
-    
-    # Descuento
-    df['Desc_val'] = df[col_inox].apply(lambda x: int(x.split('%')[0]) if '%' in str(x) else 0) if col_inox in df.columns else 0
+    # Creamos columnas numéricas auxiliares
+    df['esp_n'] = df[c_esp].apply(a_num) if c_esp else 0.0
+    df['pkg_n'] = df[c_pkg].apply(a_num) if c_pkg else 0.0
+    df['pun_n'] = df[c_pun].apply(a_num) if c_pun else 0.0
+    df['desc_n'] = df[c_ino].apply(lambda x: 1 if '%' in str(x) or 'sale' in str(x).lower() else 0) if c_ino else 0
 
-    return df
+    return df, c_sku, c_esp, c_cal, c_anc, c_lar, c_ino
 
 st.title("🛠️ Buscador de Chapas para Papá")
 
 try:
-    df = cargar_datos()
+    df, c_sku, c_esp, c_cal, c_anc, c_lar, c_ino = cargar_datos()
 
-    # Filtros
+    # Filtros laterales
     st.sidebar.header("Filtros")
     
     # Calidad
-    calidades = sorted([str(x) for x in df['Calidad'].unique() if x])
-    cal_sel = st.sidebar.multiselect("Calidad:", calidades, default=calidades[:1] if calidades else [])
+    col_cal = c_cal if c_cal else df.columns[0]
+    opciones_cal = sorted([x for x in df[col_cal].unique() if x])
+    cal_sel = st.sidebar.multiselect("Seleccionar Calidad:", opciones_cal, default=opciones_cal[:1] if opciones_cal else [])
 
     # Espesor
-    lista_esp = sorted([x for x in df['Espesor_num'].unique() if x > 0])
+    lista_esp = sorted([x for x in df['esp_n'].unique() if x > 0])
     if lista_esp:
         esp_sel = st.sidebar.select_slider("Espesor (mm):", options=lista_esp, value=(min(lista_esp), max(lista_esp)))
     else:
-        esp_sel = (0.0, 100.0)
+        esp_sel = (0.0, 500.0)
 
     solo_ofertas = st.sidebar.checkbox("💥 Ver solo Liquidaciones")
 
     # Aplicar filtros
-    mask = (df['Espesor_num'] >= esp_sel[0]) & (df['Espesor_num'] <= esp_sel[1])
-    if cal_sel: mask &= df['Calidad'].isin(cal_sel)
-    if solo_ofertas: mask &= (df['Desc_val'] > 0)
+    mask = (df['esp_n'] >= esp_sel[0]) & (df['esp_n'] <= esp_sel[1])
+    if cal_sel: mask &= df[col_cal].isin(cal_sel)
+    if solo_ofertas: mask &= (df['desc_n'] > 0)
 
-    res = df[mask].sort_values('Precio_Kg_num', ascending=True)
+    res = df[mask].sort_values('pkg_n', ascending=True)
 
-    # Mostrar
-    st.subheader(f"Resultados: {len(res)}")
-    cols_ok = [c for c in ['SKU', 'Calidad', 'Espesor', 'Ancho', 'Largo', 'Inoxsale'] if c in res.columns]
-    cols_ok += ['Precio_Kg_num', 'Precio_Un_num']
+    # Mostrar Tabla
+    st.subheader(f"Resultados: {len(res)} chapas")
     
-    st.dataframe(
-        res[cols_ok].rename(columns={'Precio_Kg_num': 'USD/Kg', 'Precio_Un_num': 'Precio Total'}),
-        use_container_width=True,
-        hide_index=True
-    )
+    # Seleccionamos qué mostrar al usuario
+    ver = [c for c in [c_sku, c_cal, c_esp, c_anc, c_lar, c_ino] if c]
+    res_mostrar = res[ver].copy()
+    res_mostrar['USD / Kg'] = res['pkg_n'].map('${:.2f}'.format)
+    res_mostrar['Precio Total'] = res['pun_n'].map('${:.2f}'.format)
+
+    st.dataframe(res_mostrar, use_container_width=True, hide_index=True)
 
 except Exception as e:
-    st.error("Error al procesar el archivo.")
-    st.write(e)
+    st.error("Todavía hay un problema con el formato del archivo.")
+    st.write("Asegurate de que el archivo en GitHub se llame 'datos.csv'")
+    st.info("Error detectado: " + str(e))
