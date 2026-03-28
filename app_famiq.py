@@ -39,7 +39,6 @@ def cargar_datos():
     df['anc_n'] = df[c_anc].apply(extraer_num) if c_anc else 0.0
     df['lar_n'] = df[c_lar].apply(extraer_num) if c_lar else 0.0
     
-    # Extraer el % de descuento numérico
     def desc_num(x):
         nums = re.findall(r'\d+', str(x))
         return int(nums[0]) if nums else 0
@@ -47,18 +46,14 @@ def cargar_datos():
 
     df = df[df['pkg_n'] > 0.1].copy()
 
-    # --- IA DE RENTABILIDAD ---
     if c_cal and c_esp:
-        # Precio mediano "normal" por tipo de chapa
         mediana = df.groupby([c_cal, 'esp_n'])['pkg_n'].transform('median')
-        # Puntaje: Cuanto más bajo el precio vs la mediana y más alto el % de Inoxsale, mejor
-        # (Mediana / Precio Actual) * (1 + Descuento/100)
         df['score_rentabilidad'] = (mediana / df['pkg_n']) * (1 + (df['desc_val'] / 100))
         df['es_anomalia'] = df['pkg_n'] < (mediana * 0.4)
     
     return df, c_sku, c_cal, c_esp, c_anc, c_lar, c_ino
 
-st.title("🔍 Buscador Inteligente Famiq")
+st.title("🔍 Buscador de Chapas para Papá")
 
 datos = cargar_datos()
 
@@ -68,37 +63,52 @@ if datos:
     st.sidebar.header("Medidas Estándar")
     medidas_pre = {
         "Manual / Ver todas": (None, None),
-        "1000 x 2000 mm": (1000, 2000),
-        "1220 x 2440 mm": (1220, 2440),
-        "1250 x 2500 mm": (1250, 2500),
-        "1500 x 3000 mm": (1500, 3000)
+        "1000 x 2000 mm": (1000.0, 2000.0),
+        "1220 x 2440 mm": (1220.0, 2440.0),
+        "1250 x 2500 mm": (1250.0, 2500.0),
+        "1500 x 3000 mm": (1500.0, 3000.0)
     }
     seleccion = st.sidebar.selectbox("Medida rápida:", list(medidas_pre.keys()))
     anc_pre, lar_pre = medidas_pre[seleccion]
 
-    st.sidebar.header("Filtros")
+    st.sidebar.header("Filtros de Precisión")
+    
+    # Espesor
+    st.sidebar.subheader("Espesor (mm)")
     c1, c2 = st.sidebar.columns(2)
-    with c1: esp_min = st.number_input("Espesor Min:", 0.0, 50.0, float(df['esp_n'].min()), 0.1)
-    with c2: esp_max = st.number_input("Espesor Max:", 0.0, 50.0, float(df['esp_n'].max()), 0.1)
+    with c1: esp_min = st.number_input("E. Min:", 0.0, 50.0, float(df['esp_n'].min()), 0.1)
+    with c2: esp_max = st.number_input("E. Max:", 0.0, 50.0, float(df['esp_n'].max()), 0.1)
 
-    st.sidebar.header("Rentabilidad")
-    # --- EL NUEVO CHECK DE ORDEN ---
+    # Ancho y Largo con lógica de desbloqueo manual
+    min_a, max_a = float(df['anc_n'].min()), float(df['anc_n'].max())
+    min_l, max_l = float(df['lar_n'].min()), float(df['lar_n'].max())
+    
+    st.sidebar.subheader("Ancho (mm)")
+    c3, c4 = st.sidebar.columns(2)
+    with c3: anc_min = st.number_input("A. Min:", 0.0, 10000.0, anc_pre if anc_pre else min_a, key="anc_min")
+    with c4: anc_max = st.number_input("A. Max:", 0.0, 10000.0, anc_pre if anc_pre else max_a, key="anc_max")
+    
+    st.sidebar.subheader("Largo (mm)")
+    c5, c6 = st.sidebar.columns(2)
+    with c5: lar_min = st.number_input("L. Min:", 0.0, 10000.0, lar_pre if lar_pre else min_l, key="lar_min")
+    with c6: lar_max = st.number_input("L. Max:", 0.0, 10000.0, lar_pre if lar_pre else max_l, key="lar_max")
+
+    st.sidebar.header("Opciones Especiales")
     orden_rentable = st.sidebar.checkbox("⭐ Ordenar por mejor Oportunidad", value=True)
     ver_anomalias = st.sidebar.checkbox("🚨 Errores de tipeo (Muy baratos)")
     solo_ofertas = st.sidebar.checkbox("💥 Solo Liquidaciones")
 
-    # Filtros
+    # --- FILTROS ---
     mask = (df['esp_n'] >= esp_min) & (df['esp_n'] <= esp_max)
+    mask &= (df['anc_n'] >= anc_min) & (df['anc_n'] <= anc_max)
+    mask &= (df['lar_n'] >= lar_min) & (df['lar_n'] <= lar_max)
+    
     if ver_anomalias: mask &= (df['es_anomalia'] == True)
     if solo_ofertas and col_ino: mask &= (df['desc_val'] > 0)
-    
-    # Filtrar por medida si se eligió rápida
-    if anc_pre: mask &= (df['anc_n'] == anc_pre)
-    if lar_pre: mask &= (df['lar_n'] == lar_pre)
 
     res = df[mask].copy()
 
-    # --- LÓGICA DE ORDEN ---
+    # Orden
     if orden_rentable:
         res = res.sort_values('score_rentabilidad', ascending=False)
     else:
@@ -117,6 +127,7 @@ if datos:
     st.dataframe(res_v[columnas_finales], use_container_width=True, hide_index=True)
     
     csv = res_v[columnas_finales].to_csv(index=False).encode('latin-1')
-    st.download_button("📥 Descargar resultados", csv, "famiq_rentable.csv", "text/csv")
+    st.download_button("📥 Descargar", csv, "famiq.csv", "text/csv")
 else:
     st.error("Archivo no encontrado.")
+    
