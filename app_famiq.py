@@ -9,7 +9,7 @@ st.set_page_config(page_title="Buscador de Gangas - Famiq", page_icon="🔍", la
 @st.cache_data
 def cargar_datos():
     # Cargar el archivo
-    df = pd.read_csv("datos.csv")
+    df = pd.read_csv("datos.csv", encoding="latin-1")
     
     # Limpiar precios
     def limpiar_precio(x):
