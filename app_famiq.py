@@ -9,7 +9,7 @@ st.set_page_config(page_title="Buscador de Gangas - Famiq", page_icon="🔍", la
 @st.cache_data
 def cargar_datos():
     # Cargar el archivo
-    df = pd.read_csv("WebScrap Famiq  chapas.xlsx - Hoja 1.csv")
+    df = pd.read_csv("datos.csv")
     
     # Limpiar precios
     def limpiar_precio(x):
